@@ -1,14 +1,16 @@
 import os
 import time
 import argparse
+from itertools import chain
 
 import torchvision
 import torch
 import torch.nn as nn
 
-from util import AverageMeter, TwoAugUnsupervisedDataset
+from util import AverageMeter, AugUnsupervisedDataset, load_transforms
 from encoder import SmallAlexNet
 from align_uniform import align_loss, uniform_loss
+
 
 
 def parse_option():
@@ -35,10 +37,13 @@ def parse_option():
     parser.add_argument('--gpus', default=[0], nargs='*', type=int,
                         help='List of GPU indices to use, e.g., --gpus 0 1 2 3')
 
+    parser.add_argument('--iter', type=int, default=0, help='identifier for the experiment')
+    parser.add_argument('--shared', action='store_true', help='uses the same encoder in all augmentations and data')
     parser.add_argument('--data_folder', type=str, default='./data', help='Path to data')
     parser.add_argument('--result_folder', type=str, default='./results', help='Base directory to save model')
-
+    parser.add_argument('--transforms', type=str, default=None)
     opt = parser.parse_args()
+    assert(opt.transforms is not None)
 
     if opt.lr is None:
         opt.lr = 0.12 * (opt.batch_size / 256)
@@ -47,27 +52,30 @@ def parse_option():
 
     opt.save_folder = os.path.join(
         opt.result_folder,
-        f"align{opt.align_w:g}alpha{opt.align_alpha:g}_unif{opt.unif_w:g}t{opt.unif_t:g}"
+        f"result_{os.path.basename(opt.transforms).split('.')[0]}_{opt.iter}"
     )
     os.makedirs(opt.save_folder, exist_ok=True)
 
     return opt
 
 
-def get_data_loader(opt):
-    transform = torchvision.transforms.Compose([
-        torchvision.transforms.RandomResizedCrop(64, scale=(0.08, 1)),
-        torchvision.transforms.RandomHorizontalFlip(),
-        torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
-        torchvision.transforms.RandomGrayscale(p=0.2),
+#
+#   transforms should be a list of transforms
+#
+def get_data_loader(opt, transforms):
+    # normalization transforms
+    transforms_norm = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
         torchvision.transforms.Normalize(
             (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
             (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
         ),
-    ])
-    dataset = TwoAugUnsupervisedDataset(
-        torchvision.datasets.STL10(opt.data_folder, 'train+unlabeled', download=True), transform=transform)
+    ]
+    )
+
+    dataset = AugUnsupervisedDataset( torchvision.datasets.STL10(opt.data_folder, 'train+unlabeled', download=True),
+                                      transforms=transforms, norm_transform=transforms_norm )
+
     return torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, num_workers=opt.num_workers,
                                        shuffle=True, pin_memory=True)
 
@@ -81,44 +89,56 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
-    encoder = nn.DataParallel(SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0]), opt.gpus)
+    transforms = load_transforms(opt.transforms)
+    loader = get_data_loader(opt, transforms=transforms)
 
-    optim = torch.optim.SGD(encoder.parameters(), lr=opt.lr,
-                            momentum=opt.momentum, weight_decay=opt.weight_decay)
+    # for each transform allocate another encoder
+    # should we use one single encoder or multiple encoders???
+
+    if opt.shared:
+        encoders = [nn.DataParallel(SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0]), opt.gpus)]
+    else:
+        encoders = [nn.DataParallel(SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0]), opt.gpus) for transform_idx in range(len(transforms)+1)]
+
+    optim = torch.optim.SGD( chain.from_iterable([encoder.parameters() for encoder in encoders]) ,
+                            lr=opt.lr,
+                            momentum=opt.momentum,
+                             weight_decay=opt.weight_decay)
+
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optim, gamma=opt.lr_decay_rate,
                                                      milestones=opt.lr_decay_epochs)
 
-    loader = get_data_loader(opt)
-
-    align_meter = AverageMeter('align_loss')
-    unif_meter = AverageMeter('uniform_loss')
     loss_meter = AverageMeter('total_loss')
     it_time_meter = AverageMeter('iter_time')
     for epoch in range(opt.epochs):
-        align_meter.reset()
-        unif_meter.reset()
         loss_meter.reset()
         it_time_meter.reset()
         t0 = time.time()
-        for ii, (im_x, im_y) in enumerate(loader):
+        for ii, imgs in enumerate(loader):
             optim.zero_grad()
-            x, y = encoder(torch.cat([im_x.to(opt.gpus[0]), im_y.to(opt.gpus[0])])).chunk(2)
-            align_loss_val = align_loss(x, y, alpha=opt.align_alpha)
-            unif_loss_val = (uniform_loss(x, t=opt.unif_t) + uniform_loss(y, t=opt.unif_t)) / 2
-            loss = align_loss_val * opt.align_w + unif_loss_val * opt.unif_w
-            align_meter.update(align_loss_val, x.shape[0])
-            unif_meter.update(unif_loss_val)
-            loss_meter.update(loss, x.shape[0])
+            if opt.shared:
+                encoded = [encoders[0](img.to(opt.gpus[0])) for img in imgs]
+            else:
+                encoded = [encoder(img.to(opt.gpus[0])) for encoder, img in zip(encoders,imgs)]
+
+            losses = torch.zeros(len(encoded[1:]))
+            for encoding_idx,encoding in enumerate(encoded[1:]):
+                align_loss_val = align_loss(encoded[0], encoding, alpha=opt.align_alpha)
+                unif_loss_val = (uniform_loss(encoded[0], t=opt.unif_t) + uniform_loss(encoding, t=opt.unif_t)) / 2
+                losses[encoding_idx] = align_loss_val * opt.align_w + unif_loss_val * opt.unif_w
+
+            loss = torch.sum(losses)
+            loss_meter.update(loss, imgs[0].shape[0])
             loss.backward()
             optim.step()
             it_time_meter.update(time.time() - t0)
             if ii % opt.log_interval == 0:
                 print(f"Epoch {epoch}/{opt.epochs}\tIt {ii}/{len(loader)}\t" +
-                      f"{align_meter}\t{unif_meter}\t{loss_meter}\t{it_time_meter}")
+                      f"{loss_meter}\t{it_time_meter}")
             t0 = time.time()
         scheduler.step()
     ckpt_file = os.path.join(opt.save_folder, 'encoder.pth')
-    torch.save(encoder.module.state_dict(), ckpt_file)
+    torch.save(encoders, ckpt_file)
     print(f'Saved to {ckpt_file}')
 
 
