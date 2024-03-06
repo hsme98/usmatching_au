@@ -84,10 +84,11 @@ def main():
     opt = parse_option()
 
     print(f'Optimize: {opt.align_w:g} * loss_align(alpha={opt.align_alpha:g}) + {opt.unif_w:g} * loss_uniform(t={opt.unif_t:g})')
-
-    torch.cuda.set_device(opt.gpus[0])
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
+    
+    if torch.cuda.is_available():
+        torch.cuda.set_device(opt.gpus[0])
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = True
 
     transforms = load_transforms(opt.transforms)
     loader = get_data_loader(opt, transforms=transforms)
