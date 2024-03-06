@@ -93,7 +93,10 @@ def main():
         eval_numel = encoder(sample.unsqueeze(0).to(opt.gpu), layer_index=opt.layer_index).numel()
     print(f'Feature dimension: {eval_numel}')
 
-    encoder.load_state_dict(torch.load(opt.encoder_checkpoint, map_location=opt.gpu))
+    try:
+        encoder.load_state_dict(torch.load(opt.encoder_checkpoint, map_location=opt.gpu))
+    except TypeError:
+        encoder = torch.load(opt.encoder_checkpoint)[0].to(opt.gpu).module
     print(f'Loaded checkpoint from {opt.encoder_checkpoint}')
 
     classifier = nn.Linear(eval_numel, 10).to(opt.gpu)
