@@ -96,7 +96,10 @@ def main():
     try:
         encoder.load_state_dict(torch.load(opt.encoder_checkpoint, map_location=opt.gpu))
     except TypeError:
-        encoder = torch.load(opt.encoder_checkpoint)[0].to(opt.gpu).module
+        try:
+            encoder = torch.load(opt.encoder_checkpoint)[0].to(opt.gpu).module
+        except:
+            encoder = torch.load(opt.encoder_checkpoint)[0].to(opt.gpu)
     print(f'Loaded checkpoint from {opt.encoder_checkpoint}')
 
     classifier = nn.Linear(eval_numel, 10).to(opt.gpu)

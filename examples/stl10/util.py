@@ -73,6 +73,27 @@ class AugUnsupervisedDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
+class DoubleAugUnsupervisedDataset(torch.utils.data.Dataset):
+    def __init__(self, dataset, transforms, norm_transform):
+        self.dataset = dataset
+        self.transforms = transforms
+        self.norm_transform = norm_transform
+
+    def __getitem__(self, index):
+        image, _ = self.dataset[index]
+        transforms = [image]
+        for transform in self.transforms:
+            transforms.append(transform(transforms[-1]))
+        for transform_idx in range(len(transforms)):
+            transforms[transform_idx] = self.norm_transform(transforms[transform_idx])
+
+        transforms_new = [transforms[-1]]
+        for transform in self.transforms:
+            transforms_new.append(transform(transforms_new[-1]))
+        return tuple(transforms_new[1:])
+
+    def __len__(self):
+        return len(self.dataset)
 
 def load_function_from_path(module_path, function_name):
     """

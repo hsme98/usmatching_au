@@ -7,7 +7,7 @@ import torchvision
 import torch
 import torch.nn as nn
 
-from util import AverageMeter, AugUnsupervisedDataset, load_transforms
+from util import AverageMeter, AugUnsupervisedDataset, load_transforms, DoubleAugUnsupervisedDataset
 from encoder import SmallAlexNet
 from align_uniform import align_loss, uniform_loss
 
@@ -41,6 +41,7 @@ def parse_option():
     parser.add_argument('--shared', action='store_true', help='uses the same encoder in all augmentations and data')
     parser.add_argument('--data_folder', type=str, default='./data', help='Path to data')
     parser.add_argument('--result_folder', type=str, default='./results', help='Base directory to save model')
+    parser.add_argument('--aug', type=str, default='single', help='single or double')
     parser.add_argument('--transforms', type=str, default=None)
     opt = parser.parse_args()
     assert(opt.transforms is not None)
@@ -73,8 +74,12 @@ def get_data_loader(opt, transforms):
     ]
     )
 
-    dataset = AugUnsupervisedDataset( torchvision.datasets.STL10(opt.data_folder, 'train+unlabeled', download=True),
-                                      transforms=transforms, norm_transform=transforms_norm )
+    if opt.aug == "double":
+        dataset = DoubleAugUnsupervisedDataset( torchvision.datasets.STL10(opt.data_folder, 'train+unlabeled', download=True),
+                                          transforms=transforms, norm_transform=transforms_norm)
+    else:
+        dataset = AugUnsupervisedDataset( torchvision.datasets.STL10(opt.data_folder, 'train+unlabeled', download=True),
+                                          transforms=transforms, norm_transform=transforms_norm )
 
     return torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, num_workers=opt.num_workers,
                                        shuffle=True, pin_memory=True)
@@ -97,9 +102,9 @@ def main():
     # should we use one single encoder or multiple encoders???
 
     if opt.shared:
-        encoders = [nn.DataParallel(SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0]), opt.gpus)]
+        encoders = [SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0])]
     else:
-        encoders = [nn.DataParallel(SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0]), opt.gpus) for transform_idx in range(len(transforms)+1)]
+        encoders = [SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0]) for transform_idx in range(len(transforms)+1)]
 
     optim = torch.optim.SGD( chain.from_iterable([encoder.parameters() for encoder in encoders]) ,
                             lr=opt.lr,
