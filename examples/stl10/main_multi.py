@@ -53,7 +53,7 @@ def parse_option():
 
     opt.save_folder = os.path.join(
         opt.result_folder,
-        f"result_{os.path.basename(opt.transforms).split('.')[0]}_{opt.iter}_{opt.shared}"
+        f"result_{os.path.basename(opt.transforms).split('.')[0]}_{opt.iter}_{opt.shared}_{opt.aug}"
     )
     os.makedirs(opt.save_folder, exist_ok=True)
 
