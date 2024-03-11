@@ -21,6 +21,7 @@ def parse_option():
 
     parser.add_argument('--batch_size', type=int, default=768, help='Batch size')
     parser.add_argument('--epochs', type=int, default=200, help='Number of training epochs')
+    parser.add_argument('--iter', type=int, default=0, help='Number of training epochs')
     parser.add_argument('--lr', type=float, default=None,
                         help='Learning rate. Default is linear scaling 0.12 per 256 batch size')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='Learning rate decay rate')
@@ -47,7 +48,7 @@ def parse_option():
 
     opt.save_folder = os.path.join(
         opt.result_folder,
-        f"align{opt.align_w:g}alpha{opt.align_alpha:g}_unif{opt.unif_w:g}t{opt.unif_t:g}"
+        f"align{opt.align_w:g}alpha{opt.align_alpha:g}_unif{opt.unif_w:g}t{opt.unif_t:g}_iter{opt.iter}"
     )
     os.makedirs(opt.save_folder, exist_ok=True)
 
