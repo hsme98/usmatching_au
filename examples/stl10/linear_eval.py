@@ -43,12 +43,12 @@ def parse_option():
 def get_data_loaders(opt):
     train_transform = torchvision.transforms.Compose([
         torchvision.transforms.RandomResizedCrop(64, scale=(0.08, 1)),
-        torchvision.transforms.RandomHorizontalFlip(),
         torchvision.transforms.ToTensor(),
         torchvision.transforms.Normalize(
             (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
             (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
         ),
+        torchvision.transforms.RandomHorizontalFlip()
     ])
     val_transform = torchvision.transforms.Compose([
         torchvision.transforms.Resize(70),

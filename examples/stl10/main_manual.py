@@ -6,7 +6,7 @@ import torchvision
 import torch
 import torch.nn as nn
 
-from util import AverageMeter, TwoAugUnsupervisedDatasetSeperation
+from util import AverageMeter, ThreeAugUnsupervisedDatasetSeperation
 from encoder import SmallAlexNet
 from align_uniform import align_loss, uniform_loss
 
@@ -48,7 +48,7 @@ def parse_option():
 
     opt.save_folder = os.path.join(
         opt.result_folder,
-        f"base_newseperation_resize_transform_align{opt.align_w:g}alpha{opt.align_alpha:g}_unif{opt.unif_w:g}t{opt.unif_t:g}_iter{opt.iter}"
+        f"manual_labels_align{opt.align_w:g}alpha{opt.align_alpha:g}_unif{opt.unif_w:g}t{opt.unif_t:g}_iter{opt.iter}"
     )
     os.makedirs(opt.save_folder, exist_ok=True)
 
@@ -56,25 +56,32 @@ def parse_option():
 
 
 def get_data_loader(opt):
-    transform = torchvision.transforms.Compose([
+    transform1 = torchvision.transforms.Compose([
         torchvision.transforms.RandomResizedCrop(64, scale=(0.08, 1)),
         torchvision.transforms.RandomHorizontalFlip(),
+    ])
+
+    transform2 = torchvision.transforms.Compose([
         torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
         torchvision.transforms.RandomGrayscale(p=0.2),
     ])
 
-    resize_transform = torchvision.transforms.Compose([  torchvision.transforms.Resize(64)])
-    normalization_transform = torchvision.transforms.Compose( [torchvision.transforms.ToTensor(),
-                                                         torchvision.transforms.Normalize(
-                                                             (0.44087801806139126, 0.42790631331699347,
-                                                              0.3867879370752931),
-                                                             (0.26826768628079806, 0.2610450402318512,
-                                                              0.26866836876860795),
-                                                         )
-                                                         ] )
+    resize_transform = torchvision.transforms.Compose([torchvision.transforms.Resize(64)])
+    normalization_transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor(),
+                                                              torchvision.transforms.Normalize(
+                                                                  (0.44087801806139126, 0.42790631331699347,
+                                                                   0.3867879370752931),
+                                                                  (0.26826768628079806, 0.2610450402318512,
+                                                                   0.26866836876860795),
+                                                              )
+                                                              ])
 
-    dataset = TwoAugUnsupervisedDatasetSeperation(
-        torchvision.datasets.STL10(opt.data_folder, 'train+unlabeled', download=True), transform=transform, resize_transform=resize_transform, normalization_transform=normalization_transform)
+    dataset = ThreeAugUnsupervisedDatasetSeperation(
+        torchvision.datasets.STL10(opt.data_folder, 'train', download=True),
+        transform_1=transform1,
+        transform_2=transform2,
+        resize_transform=resize_transform,
+        normalization_transform=normalization_transform)
     return torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, num_workers=opt.num_workers,
                                        shuffle=True, pin_memory=True)
 
@@ -82,13 +89,14 @@ def get_data_loader(opt):
 def main():
     opt = parse_option()
 
-    print(f'Optimize: {opt.align_w:g} * loss_align(alpha={opt.align_alpha:g}) + {opt.unif_w:g} * loss_uniform(t={opt.unif_t:g})')
+    print(
+        f'Optimize: {opt.align_w:g} * loss_align(alpha={opt.align_alpha:g}) + {opt.unif_w:g} * loss_uniform(t={opt.unif_t:g})')
 
     torch.cuda.set_device(opt.gpus[0])
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
-    encoder = nn.DataParallel(SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0]), opt.gpus)
+    encoder = SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0])
 
     optim = torch.optim.SGD(encoder.parameters(), lr=opt.lr,
                             momentum=opt.momentum, weight_decay=opt.weight_decay)
@@ -107,12 +115,20 @@ def main():
         loss_meter.reset()
         it_time_meter.reset()
         t0 = time.time()
-        for ii, (im_x, im_y) in enumerate(loader):
+        for ii, (im_x, im_y, im_z) in enumerate(loader):
             optim.zero_grad()
-            x, y = encoder(torch.cat([im_x.to(opt.gpus[0]), im_y.to(opt.gpus[0])])).chunk(2)
+            x = encoder(im_x.to(opt.gpus[0]))
+            y = encoder(im_y.to(opt.gpus[0]))
+            z = encoder(im_z.to(opt.gpus[0]))
+
             align_loss_val = align_loss(x, y, alpha=opt.align_alpha)
             unif_loss_val = (uniform_loss(x, t=opt.unif_t) + uniform_loss(y, t=opt.unif_t)) / 2
-            loss = align_loss_val * opt.align_w + unif_loss_val * opt.unif_w
+
+            align_loss_val_2 = align_loss(x, z, alpha=opt.align_alpha)
+            unif_loss_val_2 = (uniform_loss(x, t=opt.unif_t) + uniform_loss(z, t=opt.unif_t)) / 2
+
+            loss = (align_loss_val + align_loss_val_2) * opt.align_w + (unif_loss_val + unif_loss_val_2) * opt.unif_w
+
             align_meter.update(align_loss_val, x.shape[0])
             unif_meter.update(unif_loss_val)
             loss_meter.update(loss, x.shape[0])
@@ -125,7 +141,7 @@ def main():
             t0 = time.time()
         scheduler.step()
     ckpt_file = os.path.join(opt.save_folder, 'encoder.pth')
-    torch.save(encoder.module.state_dict(), ckpt_file)
+    torch.save(encoder.state_dict(), ckpt_file)
     print(f'Saved to {ckpt_file}')
 
 

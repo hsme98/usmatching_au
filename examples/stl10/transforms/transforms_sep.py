@@ -6,7 +6,7 @@ def get_transforms():
 
 
     transform_1 = torchvision.transforms.Compose([
-        torchvision.transforms.RandomAffine(30,scale=(0.08,1)),
+        torchvision.transforms.RandomResizedCrop(64, scale=(0.08, 1)),
         torchvision.transforms.RandomHorizontalFlip(),
     ])
 
