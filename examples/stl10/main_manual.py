@@ -20,7 +20,7 @@ def parse_option():
     parser.add_argument('--unif_t', type=float, default=2, help='t in uniformity loss')
 
     parser.add_argument('--batch_size', type=int, default=768, help='Batch size')
-    parser.add_argument('--epochs', type=int, default=200, help='Number of training epochs')
+    parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs')
     parser.add_argument('--iter', type=int, default=0, help='Number of training epochs')
     parser.add_argument('--lr', type=float, default=None,
                         help='Learning rate. Default is linear scaling 0.12 per 256 batch size')
@@ -48,7 +48,7 @@ def parse_option():
 
     opt.save_folder = os.path.join(
         opt.result_folder,
-        f"manual_labels_align{opt.align_w:g}alpha{opt.align_alpha:g}_unif{opt.unif_w:g}t{opt.unif_t:g}_iter{opt.iter}"
+        f"cifar100_manual_labels_align{opt.align_w:g}alpha{opt.align_alpha:g}_unif{opt.unif_w:g}t{opt.unif_t:g}_iter{opt.iter}"
     )
     os.makedirs(opt.save_folder, exist_ok=True)
 
@@ -57,7 +57,7 @@ def parse_option():
 
 def get_data_loader(opt):
     transform1 = torchvision.transforms.Compose([
-        torchvision.transforms.RandomResizedCrop(64, scale=(0.08, 1)),
+        torchvision.transforms.RandomResizedCrop(32, scale=(0.08, 1)),
         torchvision.transforms.RandomHorizontalFlip(),
     ])
 
@@ -66,7 +66,7 @@ def get_data_loader(opt):
         torchvision.transforms.RandomGrayscale(p=0.2),
     ])
 
-    resize_transform = torchvision.transforms.Compose([torchvision.transforms.Resize(64)])
+    resize_transform = torchvision.transforms.Compose([torchvision.transforms.Resize(32)])
     normalization_transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor(),
                                                               torchvision.transforms.Normalize(
                                                                   (0.44087801806139126, 0.42790631331699347,
@@ -77,7 +77,7 @@ def get_data_loader(opt):
                                                               ])
 
     dataset = ThreeAugUnsupervisedDatasetSeperation(
-        torchvision.datasets.STL10(opt.data_folder, 'train', download=True),
+        torchvision.datasets.CIFAR100(opt.data_folder, 'train', download=True),
         transform_1=transform1,
         transform_2=transform2,
         resize_transform=resize_transform,
@@ -96,7 +96,7 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
-    encoder = SmallAlexNet(feat_dim=opt.feat_dim).to(opt.gpus[0])
+    encoder = SmallAlexNet(feat_dim=opt.feat_dim, cifar=True).to(opt.gpus[0])
 
     optim = torch.optim.SGD(encoder.parameters(), lr=opt.lr,
                             momentum=opt.momentum, weight_decay=opt.weight_decay)
