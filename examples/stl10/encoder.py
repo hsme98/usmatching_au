@@ -12,7 +12,7 @@ class L2Norm(nn.Module):
 
 
 class SmallAlexNet(nn.Module):
-    def __init__(self, in_channel=3, feat_dim=128, cifar=False):
+    def __init__(self, in_channel=3, feat_dim=128, inp_size=64):
         super(SmallAlexNet, self).__init__()
 
         blocks = []
@@ -55,7 +55,7 @@ class SmallAlexNet(nn.Module):
             nn.MaxPool2d(3, 2),
         ))
 
-        if not cifar:
+        if inp_size == 64:
             # fc6
             blocks.append(nn.Sequential(
                 nn.Flatten(),

@@ -53,114 +53,21 @@ class TwoAugUnsupervisedDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.dataset)
-
-class TwoAugUnsupervisedDatasetSeperation(torch.utils.data.Dataset):
+class TwoAugUnsupervisedDatasetLbl(torch.utils.data.Dataset):
     r"""Returns two augmentation and no labels."""
 
-    def __init__(self, dataset, transform, resize_transform, normalization_transform):
+    def __init__(self, dataset, transform, lblmap=None):
         self.dataset = dataset
         self.transform = transform
-        self.resize_transform = resize_transform
-        self.normalization_transform = normalization_transform
+        self.lblmap = copy.deepcopy(lblmap)
 
     def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        return self.normalization_transform(self.resize_transform(image)), self.normalization_transform(self.transform(image))
+        image, lbl = self.dataset[index]
+        lbl2return = lbl if self.lblmap is None else self.lblmap[lbl]
+        return self.transform(image), self.transform(image), lbl2return
 
     def __len__(self):
         return len(self.dataset)
-
-class ThreeAugUnsupervisedDatasetSeperation(torch.utils.data.Dataset):
-    r"""Returns two augmentation and no labels."""
-
-    def __init__(self, dataset, transform_1, transform_2, resize_transform, normalization_transform):
-        self.dataset = dataset
-        self.transform_1 = transform_1
-        self.transform_2 = transform_2
-        self.resize_transform = resize_transform
-        self.normalization_transform = normalization_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        tr1 = self.transform_1(image)
-        tr2 = self.transform_2(tr1)
-        return self.normalization_transform(self.resize_transform(image)),self.normalization_transform(tr1),self.normalization_transform(tr2)
-
-    def __len__(self):
-        return len(self.dataset)
-
-class TwoAugUnsupervisedDatasetSep(torch.utils.data.Dataset):
-    r"""Returns two augmentation and no labels."""
-
-    def __init__(self, dataset, transform, resize_transform):
-        self.dataset = dataset
-        self.transform = transform
-        self.resize_transform = resize_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        return self.resize_transform(image), self.transform(image)
-
-    def __len__(self):
-        return len(self.dataset)
-
-class ThreeAugUnsupervisedDatasetSep(torch.utils.data.Dataset):
-    r"""Returns two augmentation and no labels."""
-
-    def __init__(self, dataset, transform1, transform2, resize_transform):
-        self.dataset = dataset
-        self.transform1 = transform1
-        self.transform2 = transform2
-        self.resize_transform = resize_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        tr1 = self.transform1(image)
-        tr2 = self.transform2(tr1)
-        return self.resize_transform(image),  tr1, tr2
-
-    def __len__(self):
-        return len(self.dataset)
-class AugUnsupervisedDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, transforms, norm_transform):
-        self.dataset = dataset
-        self.transforms = transforms
-        self.norm_transform = norm_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        transforms = [image]
-        for transform in self.transforms:
-            transforms.append(transform(transforms[-1]))
-        for transform_idx in range(len(transforms)):
-            transforms[transform_idx] = self.norm_transform(transforms[transform_idx])
-        return tuple(transforms[1:])
-
-    def __len__(self):
-        return len(self.dataset)
-
-class DoubleAugUnsupervisedDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, transforms, norm_transform):
-        self.dataset = dataset
-        self.transforms = transforms
-        self.norm_transform = norm_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        transforms = [image]
-        for transform in self.transforms:
-            transforms.append(transform(transforms[-1]))
-        for transform_idx in range(len(transforms)):
-            transforms[transform_idx] = self.norm_transform(transforms[transform_idx])
-
-        transforms_new = [transforms[-1]]
-        for transform in self.transforms:
-            transforms_new.append(transform(transforms_new[-1]))
-        return tuple(transforms_new[1:])
-
-    def __len__(self):
-        return len(self.dataset)
-
 def load_function_from_path(module_path, function_name):
     """
     Loads a function from a given module path (as a string) and function name.
