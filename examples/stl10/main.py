@@ -4,6 +4,7 @@ import time
 import argparse
 import json
 from datetime import datetime
+from argparse import Namespace
 
 import torchvision
 import torch
@@ -81,9 +82,18 @@ def parse_option():
     )
     os.makedirs(opt.save_folder, exist_ok=True)
 
+    def custom_serializer(obj):
+        """A custom JSON serializer for objects not serializable by default json code"""
+        if isinstance(obj, Namespace):
+            return vars(obj)  # Convert Namespace to dictionary
+        elif isinstance(obj,torch.device):
+            return str(obj)
+        raise TypeError(f"Type {type(obj)} not serializable")
+
+
     # now we save the opt file as json
     with open(os.path.join(opt.save_folder, "conf.json"), "w") as file:
-        json.dump(opt, file, indent=4)
+        json.dump(vars(opt), file, indent=4, default=custom_serializer)
 
     n_labels = 100 if opt.dataset == "cifar100" else 10
     old_lbls = list(range(n_labels))

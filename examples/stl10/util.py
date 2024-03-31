@@ -1,6 +1,7 @@
 import torch
 import importlib.util
 import sys
+import copy
 
 class AverageMeter(object):
     r"""
@@ -68,6 +69,21 @@ class TwoAugUnsupervisedDatasetLbl(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.dataset)
+
+class DatasetModifiedLblandLbl(torch.utils.data.Dataset):
+    r"""Returns two augmentation and no labels."""
+
+    def __init__(self, dataset, lblmap):
+        self.dataset = dataset
+        self.lblmap = copy.deepcopy(lblmap)
+
+    def __getitem__(self, index):
+        image, lbl = self.dataset[index]
+        return image, self.lblmap[lbl], lbl
+
+    def __len__(self):
+        return len(self.dataset)
+
 def load_function_from_path(module_path, function_name):
     """
     Loads a function from a given module path (as a string) and function name.
