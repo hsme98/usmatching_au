@@ -34,7 +34,7 @@ def parse_option():
     
     parser = argparse.ArgumentParser('STL-10 Representation Learning with Alignment and Uniformity Losses')
     parser.add_argument('--exp_file', type=str, default=None, help='labels file')
-    parser.add_argument('--dataset', type=str, default=None, help='dataset to train cifar100, imagenet')
+    parser.add_argument('--dataset', type=str, default="cifar100", help='dataset to train cifar100, imagenet')
 
     parser.add_argument('--align_w', type=float, default=1, help='Alignment loss weight')
     parser.add_argument('--unif_w', type=float, default=1, help='Uniformity loss weight')
@@ -77,7 +77,8 @@ def parse_option():
     os.makedirs(opt.save_folder)
     
     # Convert opt to a dictionary and save it as JSON
-    opt_dict = vars(opt)
+    opt_dict = copy.deepcopy(vars(opt))
+    del opt_dict["gpus"]
     json_path = os.path.join(opt.save_folder, 'options.json')
     with open(json_path, 'w') as f:
         json.dump(opt_dict, f, indent=4)
@@ -139,7 +140,7 @@ def get_datasets(opt, lblmap):
         fold_size = len(dataset) // opt.folds
         val_folds = [list(range(i * fold_size + i, (i+1) * fold_size)) for i in range(opt.folds-1)]
         
-        full_folds = [( set(range(len(dataset))).difference(val_fold) , val_fold ) for val_fold in val_folds]
+        full_folds = [( list(set(range(len(dataset))).difference(val_fold)) , val_fold ) for val_fold in val_folds]
         
         return [(torch.utils.data.Subset(dataset, fold),torch.utils.data.Subset(dataset, val_fold)) for fold, val_fold in full_folds]
 
@@ -196,6 +197,7 @@ def main():
     torch.backends.cudnn.benchmark = True
     
     for fold_idx, (dataset, dataset_val) in enumerate(folds):
+        print(f"Starting fold {fold_idx}/{len(folds)}")
         encoder = SmallAlexNet(feat_dim=opt.feat_dim, inp_size=32 if opt.dataset=="cifar100" else 64).to(opt.gpus[0])
 
         optim = torch.optim.Adam(encoder.parameters(), lr=opt.lr)
@@ -242,7 +244,7 @@ def main():
                 val_loss_meter.reset() 
                 # calculate the validation accuracy
                 with torch.no_grad():
-                    for im_x, im_y, lbl in enumerate(loader_val):
+                    for im_x, im_y, lbl in loader_val:
                         optim.zero_grad()
                         loss = calc_loss(encoder, im_x, im_y, lbl, opt)
                         val_loss_meter.update(loss, lbl.shape[0])

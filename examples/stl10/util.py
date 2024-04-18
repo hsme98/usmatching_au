@@ -1,6 +1,9 @@
 import torch
 import importlib.util
 import sys
+import os
+from torchvision import datasets
+from torchvision import transforms
 
 class AverageMeter(object):
     r"""
@@ -83,37 +86,18 @@ def load_transforms(transform_path):
     return load_function_from_path(transform_path, "get_transforms")()
 
 def prepare_imagenet(args):
-    dataset_dir = os.path.join(args.data_dir, args.dataset)
+    dataset_dir = os.path.join(args.data_folder, args.dataset)
     train_dir = os.path.join(dataset_dir, 'train')
     val_dir = os.path.join(dataset_dir, 'val', 'images')
-    kwargs = {} if args.no_cuda else {'num_workers': 1, 'pin_memory': True}
 
-    # Pre-calculated mean & std on imagenet:
-    # norm = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    # For other datasets, we could just simply use 0.5:
-    # norm = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-    
     print('Preparing dataset ...')
-    # Normalization
-    norm = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-
-    train_trans = [transforms.ToTensor()]
-    val_trans = [transforms.ToTensor(), norm]
-    
     try:
-        train_data = datasets.ImageFolder(train_dir, 
-                                        transform=transforms.Compose(train_trans + [norm]))
-
-        val_data = datasets.ImageFolder(val_dir, 
-                                        transform=transforms.Compose(val_trans))
+        train_data = datasets.ImageFolder(train_dir)
+        val_data = datasets.ImageFolder(val_dir)
     except:
         create_val_img_folder(args)
-        
-        train_data = datasets.ImageFolder(train_dir, 
-                                        transform=transforms.Compose(train_trans + [norm]))
-
-        val_data = datasets.ImageFolder(val_dir, 
-                                        transform=transforms.Compose(val_trans))
+        train_data = datasets.ImageFolder(train_dir)
+        val_data = datasets.ImageFolder(val_dir)
     
     return train_data, val_data
 
