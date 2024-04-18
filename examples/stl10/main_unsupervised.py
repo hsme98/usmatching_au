@@ -12,6 +12,7 @@ from align_uniform import align_loss,uniform_loss, uniform_loss_prelog
 import copy
 import json
 import math
+from tqdm import tqdm
 
 
 class TwoAugUnsupervisedDatasetLbl(torch.utils.data.Dataset):
@@ -225,7 +226,7 @@ def main():
         for epoch in range(opt.epochs):
             encoder.train()
             loss_meter.reset()
-            for ii, (im_x, im_y, lbl) in enumerate(loader):
+            for ii, (im_x, im_y, lbl) in tqdm(enumerate(loader)):
                 optim.zero_grad()
                 loss = calc_loss(encoder, im_x, im_y, lbl, opt)
                 loss_meter.update(loss, len(lbl))
