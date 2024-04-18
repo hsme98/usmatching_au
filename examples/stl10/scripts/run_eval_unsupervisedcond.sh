@@ -16,4 +16,4 @@ echo $file_idx
 echo $iter_idx
 
 
-python /home/gridsan/herol/usmatching_au_new_change/examples/stl10/main_linear_eval_oldlbl.py /home/gridsan/herol/usmatching_au_new_change/examples/stl10/results/cifar100_series_unsupervisedcond_${file_idx}_200/encoder_best.pth --iter $iter_idx --num_workers 10
+python /home/gridsan/herol/usmatching_au_nn/examples/stl10/main_linear_eval_oldlbl.py /home/gridsan/herol/usmatching_au_new_change/examples/stl10/results/cifar100_series_unsupervisedcond_${file_idx}_200/encoder_best.pth --iter $iter_idx --num_workers 10

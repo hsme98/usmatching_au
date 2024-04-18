@@ -19,7 +19,7 @@ import numpy as np
 
 def parse_option():
     parser = argparse.ArgumentParser('STL-10 Representation Learning with Alignment and Uniformity Losses')
-    parser.add_argument('encoder_checkpoint', type=str, help='Encoder checkpoint to evaluate')
+    parser.add_argument('exp_fold', type=str, help='path to the experiment folder')
     parser.add_argument('--feat_dim', type=int, default=128, help='Encoder feature dimensionality')
     parser.add_argument('--layer_index', type=int, default=-2, help='Evaluation layer')
 
@@ -122,14 +122,6 @@ def validate_comb(opt, encoder, classifier, val_loader):
     with torch.no_grad():
         for images, labels_mod, labels_act in val_loader:
             pred = classifier(torch.cat( (encoder(images.to(opt.gpus[0]), layer_index=opt.layer_index), torch.nn.functional.one_hot(labels_mod.to(opt.gpus[0]), num_classes=len(new_lbls))), dim=1)).argmax(dim=1)
-            correct += (pred.cpu() == labels_act).sum().item()
-    return correct / len(val_loader.dataset)
-
-def validate(opt, encoder, classifier, val_loader):
-    correct = 0
-    with torch.no_grad():
-        for images, labels_act in val_loader:
-            pred = classifier( encoder(images.to(opt.gpus[0]), layer_index=opt.layer_index).flatten(1) ).argmax(dim=1)
             correct += (pred.cpu() == labels_act).sum().item()
     return correct / len(val_loader.dataset)
 
