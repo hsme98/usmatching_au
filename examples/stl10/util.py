@@ -40,127 +40,6 @@ class AverageMeter(object):
         return self.fmtstr.format(val=val, avg=self.avg)
 
 
-class TwoAugUnsupervisedDataset(torch.utils.data.Dataset):
-    r"""Returns two augmentation and no labels."""
-
-    def __init__(self, dataset, transform):
-        self.dataset = dataset
-        self.transform = transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        return self.transform(image), self.transform(image)
-
-    def __len__(self):
-        return len(self.dataset)
-
-class TwoAugUnsupervisedDatasetSeperation(torch.utils.data.Dataset):
-    r"""Returns two augmentation and no labels."""
-
-    def __init__(self, dataset, transform, resize_transform, normalization_transform):
-        self.dataset = dataset
-        self.transform = transform
-        self.resize_transform = resize_transform
-        self.normalization_transform = normalization_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        return self.normalization_transform(self.resize_transform(image)), self.normalization_transform(self.transform(image))
-
-    def __len__(self):
-        return len(self.dataset)
-
-class ThreeAugUnsupervisedDatasetSeperation(torch.utils.data.Dataset):
-    r"""Returns two augmentation and no labels."""
-
-    def __init__(self, dataset, transform_1, transform_2, resize_transform, normalization_transform):
-        self.dataset = dataset
-        self.transform_1 = transform_1
-        self.transform_2 = transform_2
-        self.resize_transform = resize_transform
-        self.normalization_transform = normalization_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        tr1 = self.transform_1(image)
-        tr2 = self.transform_2(tr1)
-        return self.normalization_transform(self.resize_transform(image)),self.normalization_transform(tr1),self.normalization_transform(tr2)
-
-    def __len__(self):
-        return len(self.dataset)
-
-class TwoAugUnsupervisedDatasetSep(torch.utils.data.Dataset):
-    r"""Returns two augmentation and no labels."""
-
-    def __init__(self, dataset, transform, resize_transform):
-        self.dataset = dataset
-        self.transform = transform
-        self.resize_transform = resize_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        return self.resize_transform(image), self.transform(image)
-
-    def __len__(self):
-        return len(self.dataset)
-
-class ThreeAugUnsupervisedDatasetSep(torch.utils.data.Dataset):
-    r"""Returns two augmentation and no labels."""
-
-    def __init__(self, dataset, transform1, transform2, resize_transform):
-        self.dataset = dataset
-        self.transform1 = transform1
-        self.transform2 = transform2
-        self.resize_transform = resize_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        tr1 = self.transform1(image)
-        tr2 = self.transform2(tr1)
-        return self.resize_transform(image),  tr1, tr2
-
-    def __len__(self):
-        return len(self.dataset)
-class AugUnsupervisedDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, transforms, norm_transform):
-        self.dataset = dataset
-        self.transforms = transforms
-        self.norm_transform = norm_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        transforms = [image]
-        for transform in self.transforms:
-            transforms.append(transform(transforms[-1]))
-        for transform_idx in range(len(transforms)):
-            transforms[transform_idx] = self.norm_transform(transforms[transform_idx])
-        return tuple(transforms[1:])
-
-    def __len__(self):
-        return len(self.dataset)
-
-class DoubleAugUnsupervisedDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, transforms, norm_transform):
-        self.dataset = dataset
-        self.transforms = transforms
-        self.norm_transform = norm_transform
-
-    def __getitem__(self, index):
-        image, _ = self.dataset[index]
-        transforms = [image]
-        for transform in self.transforms:
-            transforms.append(transform(transforms[-1]))
-        for transform_idx in range(len(transforms)):
-            transforms[transform_idx] = self.norm_transform(transforms[transform_idx])
-
-        transforms_new = [transforms[-1]]
-        for transform in self.transforms:
-            transforms_new.append(transform(transforms_new[-1]))
-        return tuple(transforms_new[1:])
-
-    def __len__(self):
-        return len(self.dataset)
-
 def load_function_from_path(module_path, function_name):
     """
     Loads a function from a given module path (as a string) and function name.
@@ -202,3 +81,74 @@ def load_function_from_path(module_path, function_name):
 
 def load_transforms(transform_path):
     return load_function_from_path(transform_path, "get_transforms")()
+
+def prepare_imagenet(args):
+    dataset_dir = os.path.join(args.data_dir, args.dataset)
+    train_dir = os.path.join(dataset_dir, 'train')
+    val_dir = os.path.join(dataset_dir, 'val', 'images')
+    kwargs = {} if args.no_cuda else {'num_workers': 1, 'pin_memory': True}
+
+    # Pre-calculated mean & std on imagenet:
+    # norm = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    # For other datasets, we could just simply use 0.5:
+    # norm = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    
+    print('Preparing dataset ...')
+    # Normalization
+    norm = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+
+    train_trans = [transforms.ToTensor()]
+    val_trans = [transforms.ToTensor(), norm]
+    
+    try:
+        train_data = datasets.ImageFolder(train_dir, 
+                                        transform=transforms.Compose(train_trans + [norm]))
+
+        val_data = datasets.ImageFolder(val_dir, 
+                                        transform=transforms.Compose(val_trans))
+    except:
+        create_val_img_folder(args)
+        
+        train_data = datasets.ImageFolder(train_dir, 
+                                        transform=transforms.Compose(train_trans + [norm]))
+
+        val_data = datasets.ImageFolder(val_dir, 
+                                        transform=transforms.Compose(val_trans))
+    
+    return train_data, val_data
+
+
+def create_val_img_folder(args):
+    '''
+    This method is responsible for separating validation images into separate sub folders
+    '''
+    dataset_dir = os.path.join(args.data_dir, args.dataset)
+    val_dir = os.path.join(dataset_dir, 'val')
+    img_dir = os.path.join(val_dir, 'images')
+
+    fp = open(os.path.join(val_dir, 'val_annotations.txt'), 'r')
+    data = fp.readlines()
+    val_img_dict = {}
+    for line in data:
+        words = line.split('\t')
+        val_img_dict[words[0]] = words[1]
+    fp.close()
+
+    # Create folder if not present and move images into proper folders
+    for img, folder in val_img_dict.items():
+        newpath = (os.path.join(img_dir, folder))
+        if not os.path.exists(newpath):
+            os.makedirs(newpath)
+        if os.path.exists(os.path.join(img_dir, img)):
+            os.rename(os.path.join(img_dir, img), os.path.join(newpath, img))
+
+
+def get_class_name(args):
+    class_to_name = dict()
+    fp = open(os.path.join(args.data_dir, args.dataset, 'words.txt'), 'r')
+    data = fp.readlines()
+    for line in data:
+        words = line.strip('\n').split('\t')
+        class_to_name[words[0]] = words[1].split(',')[0]
+    fp.close()
+    return class_to_name

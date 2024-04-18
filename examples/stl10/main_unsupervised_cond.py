@@ -1,14 +1,15 @@
 import os
 import time
 import argparse
+import datetime
 
 import torchvision
 import torch
 import torch.nn as nn
 
-from util import AverageMeter
+from util import AverageMeter, prepare_imagenet
 from encoder import SmallAlexNet
-from align_uniform import align_loss, uniform_loss_prelog
+from align_uniform import align_loss,uniform_loss, uniform_loss_prelog
 from tqdm import tqdm
 from collections import defaultdict
 import numpy as np
@@ -38,6 +39,7 @@ def parse_option():
     
     parser = argparse.ArgumentParser('STL-10 Representation Learning with Alignment and Uniformity Losses')
     parser.add_argument('--exp_file', type=str, default=None, help='labels file')
+    parser.add_argument('--dataset', type=str, default=None, help='dataset to train cifar100, imagenet')
 
     parser.add_argument('--align_w', type=float, default=1, help='Alignment loss weight')
     parser.add_argument('--unif_w', type=float, default=1, help='Uniformity loss weight')
@@ -60,115 +62,121 @@ def parse_option():
     parser.add_argument('--log_interval', type=int, default=40, help='Number of iterations between logs')
     parser.add_argument('--gpus', default=[0], nargs='*', type=int,
                         help='List of GPU indices to use, e.g., --gpus 0 1 2 3')
+    
+    parser.add_argument('--folds', type=int, default=1, help="number of folds for cross validation")
 
     parser.add_argument('--data_folder', type=str, default='./data', help='Path to data')
     parser.add_argument('--result_folder', type=str, default='./results', help='Base directory to save model')
-
+    
     opt = parser.parse_args()
 
     if opt.lr is None:
         opt.lr = 0.12 * (opt.batch_size / 256)
 
     opt.gpus = list(map(lambda x: torch.device('cuda', x), opt.gpus))
-
+    
     opt.save_folder = os.path.join(
         opt.result_folder,
-        f"cifar100_series_unsupervisedcond_newlbls_{opt.iter}_{opt.epochs}" if opt.exp_file is None else f"cifar100_series_coarse_unsupervisedcond_{opt.iter}_{opt.epochs}"
+        f"experiment_{int(datetime.datetime.now().timestamp() * 1000 )}"
     )
-    os.makedirs(opt.save_folder, exist_ok=True)
-
+    os.makedirs(opt.save_folder)
+    
+    # Convert opt to a dictionary and save it as JSON
+    opt_dict = vars(opt)
+    json_path = os.path.join(opt.save_folder, 'options.json')
+    with open(json_path, 'w') as f:
+        json.dump(opt_dict, f, indent=4)
+    
+    print(f"Results will be saved under {opt.save_folder}")
+     
     return opt
 
 
 
 
-def get_data_loader(opt, lblmap):
-    transform = torchvision.transforms.Compose([
-        torchvision.transforms.RandomResizedCrop(32, scale=(0.08, 1)),
-        torchvision.transforms.RandomHorizontalFlip(),
-        torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
-        torchvision.transforms.RandomGrayscale(p=0.2),
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.Normalize(
-            (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
-            (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
-        ),
-    ])
-    dataset = TwoAugUnsupervisedDatasetLbl(
-        torchvision.datasets.CIFAR100(opt.data_folder, 'train', download=True), 
-        transform=transform, 
-        lblmap=lblmap )
+def get_datasets(opt, lblmap):
     
-    return torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, num_workers=opt.num_workers,
-                                       shuffle=True, pin_memory=True)
+    if opt.dataset == "cifar100":
+        transform = torchvision.transforms.Compose([
+            torchvision.transforms.RandomResizedCrop(32, scale=(0.08, 1)), # make this 0.2 later
+            torchvision.transforms.RandomHorizontalFlip(),
+            torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+            torchvision.transforms.RandomGrayscale(p=0.2),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(
+                (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
+                (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
+            ),
+        ])
+
+
+        dataset = TwoAugUnsupervisedDatasetLbl(
+            torchvision.datasets.CIFAR100(opt.data_folder, 'train', download=True), 
+            transform=transform, 
+            lblmap=lblmap )
+    else:
+        transform = torchvision.transforms.Compose([
+            torchvision.transforms.RandomResizedCrop(64, scale=(0.08, 1)),
+            torchvision.transforms.RandomHorizontalFlip(),
+            torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+            torchvision.transforms.RandomGrayscale(p=0.2),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(
+                (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
+                (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
+            ),
+        ])
+
+
+        imagenet_train, _ = prepare_imagenet(opt)
+        
+        dataset = TwoAugUnsupervisedDatasetLbl(
+            imagent_train,
+            transform=transform, 
+            lblmap=lblmap )
+    
+    
+    # generate folds based on the dataset object and return the split as the 
+    if opt.folds < 2:
+        return [(dataset,None)]
+    else:
+        # calculate the indices of each fold and the validation
+        fold_size = len(dataset) // opt.folds
+        val_folds = [list(range(i * fold_size + i, (i+1) * fold_size)) for i in range(opt.folds-1)]
+        
+        full_folds = [( set(range(len(dataset))).difference(val_fold) , val_fold ) for val_fold in val_folds]
+        
+        return [(torch.utils.data.Subset(dataset, fold),torch.utils.data.Subset(dataset, val_fold)) for fold, val_fold in full_folds]
+
+
+def calc_loss(encoder , im_x, im_y, lbl, opt):
+    x, y = encoder(torch.cat([im_x.to(opt.gpus[0]), im_y.to(opt.gpus[0])])).chunk(2)
+
+    align_loss_val = align_loss(x, y, alpha=opt.align_alpha)
+    
+    if opt.exp_file is None:
+        unif_loss_val =  (uniform_loss(x, t=opt.unif_t) + uniform_loss(y, t=opt.unif_t)) / 2
+    else:
+         z = torch.cat( [x, y])
+        lbl_z = torch.cat([lbl, lbl])
+        unif_losses = torch.cat([uniform_loss_prelog(z[lbl_z==new_lbl], t=opt.unif_t) for new_lbl in new_lbls])
+        unif_loss_val = torch.log( torch.mean(unif_losses) )
+
+    loss =  align_loss_val * opt.align_w + unif_loss_val * opt.unif_w
 
 
 def main():
     opt = parse_option()
+    assert(opt.dataset in ["cifar100", "imagenet"]) 
+    old_lbls = list(range(100)) if opt.dataset == "cifar100" else list(range(200))
     
     if opt.exp_file is None:
-        
-        transform = torchvision.transforms.Compose([
-                torchvision.transforms.RandomResizedCrop(32, scale=(0.08, 1)),
-                torchvision.transforms.RandomHorizontalFlip(),
-                torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
-                torchvision.transforms.RandomGrayscale(p=0.2),
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize(
-                    (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
-                    (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
-                ),
-            ])
-
-        arr =np.array([ 4,  1, 14,  8,  0,  6,  7,  7, 18,  3,  
-                                       3, 14,  9, 18,  7, 11,  3,  9,  7, 11,
-                                       6, 11,  5, 10,  7,  6, 13, 15,  3, 15,  
-                                       0, 11,  1, 10, 12, 14, 16,  9, 11,  5, 
-                                       5, 19,  8,  8, 15, 13, 14, 17, 18, 10, 
-                                       16, 4, 17,  4,  2,  0, 17,  4, 18, 17, 
-                                       10, 3,  2, 12, 12, 16, 12,  1,  9, 19,  
-                                       2, 10,  0,  1, 16, 12,  9, 13, 15, 13, 
-                                      16, 19,  2,  4,  6, 19,  5,  5,  8, 19, 
-                                      18,  1,  2, 15,  6,  0, 17,  8, 14, 13])
-                                      
-        
-        old_lbls = list(range(100))
-        old2new = {i:arr[i] for i in range(len(arr))}
-        new_lbls = list(np.unique(arr))
-        count = len(new_lbls)
-        
-        """
-        old_lbls = list(range(100))
-        labels_2_keep = list(range(25))
-        # labels_2_keep = [0,1,2,3]
-
-        old2new = {}
-        count = 0
-        for old_lbl in old_lbls:
-            if old_lbl in labels_2_keep: 
-                old2new[old_lbl] = count
-                count += 1
-
-        for old_lbl in old_lbls:
-            if old_lbl not in labels_2_keep: 
-                old2new[old_lbl] = count
-
-        new_lbls = list(range(count+1))
-        """
+        labels_2_keep = old_lbls
+        old2new = None
+        new_lbls = None
     else:
         print(f"Loading experiment file {opt.exp_file}") 
-        transform = torchvision.transforms.Compose([
-                torchvision.transforms.RandomResizedCrop(32, scale=(0.08, 1)),
-                torchvision.transforms.RandomHorizontalFlip(),
-                torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
-                torchvision.transforms.RandomGrayscale(p=0.2),
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize(
-                    (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
-                    (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
-                ),
-            ])
-
+        
         old_lbls = list(range(100))
         
         with open(opt.exp_file,"r") as f:
@@ -190,70 +198,81 @@ def main():
                 old2new[old_lbl] = count
 
         new_lbls = list(range(count+1))
-
+    
     print(f'Optimize: {opt.align_w:g} * loss_align(alpha={opt.align_alpha:g}) + {opt.unif_w:g} * loss_uniform(t={opt.unif_t:g})')
-
+    
     torch.cuda.set_device(opt.gpus[0])
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
-
-    encoder = SmallAlexNet(feat_dim=opt.feat_dim, cifar=True).to(opt.gpus[0])
-
-    optim = torch.optim.Adam(encoder.parameters(), lr=1e-2)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optim, gamma=opt.lr_decay_rate,
-                                                     milestones=opt.lr_decay_epochs)
-
-    loader = get_data_loader(opt, old2new)
-    align_meter = AverageMeter('align_loss')
-    unif_meter = AverageMeter('uniform_loss')
-    loss_meter = AverageMeter('total_loss')
-    it_time_meter = AverageMeter('iter_time')
     
-    best_score = math.inf
-    best_model = None 
-    for epoch in range(opt.epochs):
-        align_meter.reset()
-        unif_meter.reset()
-        loss_meter.reset()
-        it_time_meter.reset()
-        t0 = time.time()
-        for ii, (im_x, im_y, lbl) in enumerate(loader):
-            optim.zero_grad()
-            x, y = encoder(torch.cat([im_x.to(opt.gpus[0]), im_y.to(opt.gpus[0])])).chunk(2)
+    for fold_idx, (dataset, dataset_val) in enumerate(folds):
+        encoder = SmallAlexNet(feat_dim=opt.feat_dim, inp_size=32 if opt.dataset=="cifar100" else 64).to(opt.gpus[0])
 
-            align_loss_val = align_loss(x, y, alpha=opt.align_alpha)
-            # group according to new_lbls
+        optim = torch.optim.Adam(encoder.parameters(), lr=opt.lr)
+        
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optim, 
+                                                         gamma=opt.lr_decay_rate,
+                                                         milestones=opt.lr_decay_epochs)
+        
+        loader = torch.utils.data.DataLoader(dataset, 
+                                             batch_size=opt.batch_size, 
+                                             num_workers=opt.num_workers,
+                                             shuffle=True,
+                                             pin_memory=True)
+        
+        loader_val = torch.utils.data.DataLoader(dataset_val, 
+                                                 batch_size=opt.batch_size, 
+                                                 num_workers=opt.num_workers,
+                                                 shuffle=False, 
+                                                 pin_memory=True)
+        loss_meter = AverageMeter('total_loss')
+        val_loss_meter = AverageMeter('val_loss')
+        best_val_loss = math.inf
+        best_encoder = None
 
-            z = torch.cat( [x, y])
-            lbl_z = torch.cat([lbl, lbl])
-            unif_losses = torch.cat([uniform_loss_prelog(z[lbl_z==new_lbl]) for new_lbl in new_lbls])
-            unif_loss_val = torch.log( torch.mean(unif_losses) )
+        for epoch in range(opt.epochs):
+            encoder.train()
+            loss_meter.reset()
+            for ii, (im_x, im_y, lbl) in enumerate(loader):
+                optim.zero_grad()
+                loss = calc_loss(encoder, im_x, im_y, lbl, opt)
+                loss_meter.update(loss, len(lbl))
+                loss.backward()
+                optim.step()
+                
+                if ii % opt.log_interval == 0:
+                    print(f"Epoch {epoch}/{opt.epochs}\tIt {ii}/{len(loader)}\t" +
+                          f"\t{loss_meter}")
 
-            loss = align_loss_val * opt.align_w + unif_loss_val * opt.unif_w
-            align_meter.update(align_loss_val, x.shape[0])
-            unif_meter.update(unif_loss_val)
-            loss_meter.update(loss, x.shape[0])
-            loss.backward()
-            optim.step()
-            it_time_meter.update(time.time() - t0)
+            scheduler.step()
             
             
-            if ii % opt.log_interval == 0:
-                print(f"Epoch {epoch}/{opt.epochs}\tIt {ii}/{len(loader)}\t" +
-                      f"{align_meter}\t{unif_meter}\t{loss_meter}\t{it_time_meter}\t{best_score}")
-        
-            t0 = time.time()
-        
-        if loss_meter.avg < best_score:
-            best_score = loss_meter.avg
-            best_model = copy.deepcopy(encoder)
-        scheduler.step()
+            if dataset_val is not None:
+                encoder.eval()
+                val_loss_meter.reset() 
+                # calculate the validation accuracy
+                with torch.no_grad():
+                    for im_x, im_y, lbl in enumerate(loader_val):
+                        optim.zero_grad()
+                        loss = calc_loss(encoder, im_x, im_y, lbl, opt)
+                        val_loss_meter.update(loss, lbl.shape[0])
 
-    ckpt_file = os.path.join(opt.save_folder, 'encoder.pth')
-    torch.save(encoder.state_dict(), ckpt_file)
-    ckpt_best_file = os.path.join(opt.save_folder, 'encoder_best.pth')
-    torch.save(best_model.state_dict(), ckpt_best_file)
-    print(f'Saved to {ckpt_file} and {ckpt_best_file}')
+                if val_loss.avg < best_val_loss:
+                    best_val_loss = val_loss.avg
+                    best_encoder = copy.deepcopy(encoder)
+
+                print(f"Validation: Epoch {epoch}/{opt.epochs}\t{val_loss.avg}\t{best_val_loss}")
+        
+        """
+            save the best encoder and the last encoder
+        """
+        torch.save(encoder.state_dict(), os.path.join(opt.save_folder, f'encoder_{fold_idx}.pth'))
+        
+        if dataset_val is not None:
+            torch.save(best_encoder.state_dict(), os.path.join(opt.save_folder, f'best_encoder_{fold_idx}.pth'))
+
+            with open(os.path.join(opt.save_folder, f"folds_{fold_idx}.txt"),"w") as f:
+                f.write(f"{best_val_loss}\n")
 
 if __name__ == '__main__':
     main()
