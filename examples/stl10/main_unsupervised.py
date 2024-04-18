@@ -166,32 +166,17 @@ def main():
     assert(opt.dataset in ["cifar100", "imagenet"]) 
 
     if opt.exp_file is None:
-        old2new = None
+        lbl_map = None
     else:
         print(f"Loading experiment file {opt.exp_file}")
 
-        old_lbls = list(range(100)) if opt.dataset == "cifar100" else list(range(200))
-
         with open(opt.exp_file,"r") as f:
             exp_file_data = json.load(f)
-        
-        labels_2_keep = exp_file_data["labels"]
-        
-        print(f"Labels to keep:{labels_2_keep}")
+        lbl_map = exp_file_data["label_map"]
 
-        old2new = {}
-        count = 0
-        for old_lbl in old_lbls:
-            if old_lbl in labels_2_keep: 
-                old2new[old_lbl] = count
-                count += 1
-
-        for old_lbl in old_lbls:
-            if old_lbl not in labels_2_keep: 
-                old2new[old_lbl] = count
 
     print(f'Optimize: {opt.align_w:g} * loss_align(alpha={opt.align_alpha:g}) + {opt.unif_w:g} * loss_uniform(t={opt.unif_t:g})')
-    folds = get_datasets(opt,old2new)
+    folds = get_datasets(opt,lbl_map)
 
     torch.cuda.set_device(opt.gpus[0])
     torch.backends.cudnn.deterministic = True
