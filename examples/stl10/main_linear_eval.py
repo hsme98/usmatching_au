@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch.utils.data.dataset import Subset
 import os
 
-from util import AverageMeter
+from util import AverageMeter, prepare_imagenet
 from encoder import SmallAlexNet
 import json
 import copy
@@ -53,60 +53,54 @@ def parse_option():
 
     return opt
 
-
-class DatasetModifiedLbl(torch.utils.data.Dataset):
-    r"""Returns two augmentation and no labels."""
-
-    def __init__(self, dataset, lblmap=None):
-        self.dataset = dataset
-        self.lblmap = copy.deepcopy(lblmap)
-
-    def __getitem__(self, index):
-        image, lbl = self.dataset[index]
-        lbl2return = lbl if self.lblmap is None else self.lblmap[lbl]
-        return image, lbl2return
-
-    def __len__(self):
-        return len(self.dataset)
     
     
 class DatasetModifiedLblandLbl(torch.utils.data.Dataset):
     r"""Returns two augmentation and no labels."""
 
-    def __init__(self, dataset, lblmap):
+    def __init__(self, dataset, lblmap, transform=None):
         self.dataset = dataset
         self.lblmap = copy.deepcopy(lblmap)
+        self.transform = transform
 
     def __getitem__(self, index):
         image, lbl = self.dataset[index]
+        image = self.transform(image) if self.transform is not None else image
         return image, self.lblmap[lbl], lbl
 
     def __len__(self):
         return len(self.dataset)
 
-def get_datasets(opt,lblmap):
-    train_transform = torchvision.transforms.Compose([
-        torchvision.transforms.RandomResizedCrop(32, scale=(0.08, 1)),
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.Normalize(
-            (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
-            (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
-        ),
-        torchvision.transforms.RandomHorizontalFlip()
-    ])
-    val_transform = torchvision.transforms.Compose([
-        torchvision.transforms.Resize(35),
-        torchvision.transforms.CenterCrop(32),
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.Normalize(
-            (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
-            (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
-        ),
-    ])
+def get_datasets(opt,lblmap, opt_exp):
+    if opt_exp["dataset"] == "cifar100":
+        val_transform = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(35),
+            torchvision.transforms.CenterCrop(32),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(
+                (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
+                (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
+            ),
+        ])
 
 
-    dataset = DatasetModifiedLblandLbl( torchvision.datasets.CIFAR100(opt.data_folder, 'test', transform=val_transform), lblmap=lblmap)
+        dataset = DatasetModifiedLblandLbl( torchvision.datasets.CIFAR100(opt.data_folder, 'test', transform=val_transform), lblmap=lblmap)
+    elif opt_exp["dataset"] == "imagenet":
+        val_transform = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(70),
+            torchvision.transforms.CenterCrop(64),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(
+                (0.44087801806139126, 0.42790631331699347, 0.3867879370752931),
+                (0.26826768628079806, 0.2610450402318512, 0.26866836876860795),
+            ),
+        ])
 
+        _, imagenet_val = prepare_imagenet(opt)
+
+        dataset = DatasetModifiedLblandLbl(imagenet_val,transform=val_transform,lblmap=lblmap)
+    else:
+        raise ValueError
     if opt.folds == 1:
         perm = np.random.permutation(len(dataset))
         train_split, val_split = perm[:int(len(dataset) * opt.train_split)], perm[int(len(dataset) * opt.train_split):]
