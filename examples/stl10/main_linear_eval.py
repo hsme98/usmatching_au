@@ -101,6 +101,7 @@ def get_datasets(opt,lblmap, opt_exp):
         dataset = DatasetModifiedLblandLbl(imagenet_val,transform=val_transform,lblmap=lblmap)
     else:
         raise ValueError
+
     if opt.folds == 1:
         perm = np.random.permutation(len(dataset))
         train_split, val_split = perm[:int(len(dataset) * opt.train_split)], perm[int(len(dataset) * opt.train_split):]
