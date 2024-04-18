@@ -1,22 +1,17 @@
 import os
-import time
 import argparse
 import datetime
 
 import torchvision
 import torch
-import torch.nn as nn
 
 from util import AverageMeter, prepare_imagenet
 from encoder import SmallAlexNet
 from align_uniform import align_loss,uniform_loss, uniform_loss_prelog
-from tqdm import tqdm
-from collections import defaultdict
-import numpy as np
+
 import copy
 import json
 import math
-import matplotlib.pyplot as plt
 
 
 class TwoAugUnsupervisedDatasetLbl(torch.utils.data.Dataset):
@@ -131,7 +126,7 @@ def get_datasets(opt, lblmap):
         imagenet_train, _ = prepare_imagenet(opt)
         
         dataset = TwoAugUnsupervisedDatasetLbl(
-            imagent_train,
+            imagenet_train,
             transform=transform, 
             lblmap=lblmap )
     
@@ -151,41 +146,37 @@ def get_datasets(opt, lblmap):
 
 def calc_loss(encoder , im_x, im_y, lbl, opt):
     x, y = encoder(torch.cat([im_x.to(opt.gpus[0]), im_y.to(opt.gpus[0])])).chunk(2)
-
     align_loss_val = align_loss(x, y, alpha=opt.align_alpha)
-    
+
     if opt.exp_file is None:
         unif_loss_val =  (uniform_loss(x, t=opt.unif_t) + uniform_loss(y, t=opt.unif_t)) / 2
     else:
-         z = torch.cat( [x, y])
+        z = torch.cat( [x, y])
         lbl_z = torch.cat([lbl, lbl])
-        unif_losses = torch.cat([uniform_loss_prelog(z[lbl_z==new_lbl], t=opt.unif_t) for new_lbl in new_lbls])
+        unif_losses = torch.cat([uniform_loss_prelog(z[lbl_z==new_lbl], t=opt.unif_t) for new_lbl in torch.unique(lbl)])
         unif_loss_val = torch.log( torch.mean(unif_losses) )
 
-    loss =  align_loss_val * opt.align_w + unif_loss_val * opt.unif_w
+    return  align_loss_val * opt.align_w + unif_loss_val * opt.unif_w
 
 
 def main():
     opt = parse_option()
     assert(opt.dataset in ["cifar100", "imagenet"]) 
-    old_lbls = list(range(100)) if opt.dataset == "cifar100" else list(range(200))
-    
+
     if opt.exp_file is None:
-        labels_2_keep = old_lbls
         old2new = None
-        new_lbls = None
     else:
-        print(f"Loading experiment file {opt.exp_file}") 
-        
-        old_lbls = list(range(100))
-        
+        print(f"Loading experiment file {opt.exp_file}")
+
+        old_lbls = list(range(100)) if opt.dataset == "cifar100" else list(range(200))
+
         with open(opt.exp_file,"r") as f:
             exp_file_data = json.load(f)
         
         labels_2_keep = exp_file_data["labels"]
         
         print(f"Labels to keep:{labels_2_keep}")
-        
+
         old2new = {}
         count = 0
         for old_lbl in old_lbls:
@@ -197,10 +188,9 @@ def main():
             if old_lbl not in labels_2_keep: 
                 old2new[old_lbl] = count
 
-        new_lbls = list(range(count+1))
-    
     print(f'Optimize: {opt.align_w:g} * loss_align(alpha={opt.align_alpha:g}) + {opt.unif_w:g} * loss_uniform(t={opt.unif_t:g})')
-    
+    folds = get_datasets(opt,old2new)
+
     torch.cuda.set_device(opt.gpus[0])
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
@@ -257,11 +247,11 @@ def main():
                         loss = calc_loss(encoder, im_x, im_y, lbl, opt)
                         val_loss_meter.update(loss, lbl.shape[0])
 
-                if val_loss.avg < best_val_loss:
-                    best_val_loss = val_loss.avg
+                if val_loss_meter.avg < best_val_loss:
+                    best_val_loss = val_loss_meter.avg
                     best_encoder = copy.deepcopy(encoder)
 
-                print(f"Validation: Epoch {epoch}/{opt.epochs}\t{val_loss.avg}\t{best_val_loss}")
+                print(f"Validation: Epoch {epoch}/{opt.epochs}\t{val_loss_meter.avg}\t{best_val_loss}")
         
         """
             save the best encoder and the last encoder
